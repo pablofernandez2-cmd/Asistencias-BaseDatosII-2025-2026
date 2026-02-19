@@ -8,17 +8,32 @@ from zoneinfo import ZoneInfo
 
 FILA_INICIO = 10
 
-# Configuración desde secrets
+# =============================
+# Función para convertir letra de columna a número
+# =============================
+def col_to_num(col):
+    col = str(col).upper()
+    num = 0
+    for c in col:
+        if not 'A' <= c <= 'Z':
+            raise ValueError(f"Columna inválida: {col}")
+        num = num * 26 + (ord(c) - ord('A') + 1)
+    return num
+
+# =============================
+# Cargar configuración y secretos
+# =============================
 token = os.environ["GITHUB_TOKEN"]
 repo = os.environ["REPO"]
 config = json.loads(os.environ["ASISTENCIA_CONFIG"])
 
+raw_col = config["columna"]
+columna = col_to_num(raw_col)
+
 fecha = config["fecha"]
 hora_inicio = config["hora_inicio"]
 hora_fin = config["hora_fin"]
-columna = int(config["columna"])
 
-# Cargar alumnos
 csv_raw = os.environ["ALUMNOS_CSV"]
 f = io.StringIO(csv_raw)
 reader = csv.reader(f, delimiter=';')
@@ -31,43 +46,62 @@ for row in reader:
     nombre, numero, grupo, github = [x.strip() for x in row[:4]]
     alumnos[github.lower()] = numero
 
-# Procesar PR del evento actual
-url = f"https://api.github.com/repos/{repo}/pulls?state=open&per_page=100"
-req = urllib.request.Request(url, headers={
-    "Authorization": f"Bearer {token}",
-    "Accept": "application/vnd.github+json"
-})
-response = urllib.request.urlopen(req)
-prs = json.loads(response.read().decode())
+# =============================
+# Obtener commits desde GitHub
+# =============================
+url = f"https://api.github.com/repos/{repo}/commits?per_page=100"
 
-for pr in prs:
-    created_at = pr["created_at"]
-    user = pr["user"]["login"].lower()
+req = urllib.request.Request(
+    url,
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json"
+    }
+)
+
+response = urllib.request.urlopen(req)
+commits = json.loads(response.read().decode())
+
+procesados = 0
+
+for commit in commits:
+    user = commit["author"]["login"].lower() if commit.get("author") else None
+    if not user or user not in alumnos:
+        continue
+
+    created_at = commit["commit"]["author"]["date"]  # UTC
     dt_utc = datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=ZoneInfo("UTC"))
     dt_spain = dt_utc.astimezone(ZoneInfo("Europe/Madrid"))
 
-    fecha_pr = dt_spain.strftime("%Y-%m-%d")
-    hora_pr = dt_spain.strftime("%H:%M")
+    fecha_commit = dt_spain.strftime("%Y-%m-%d")
+    hora_commit = dt_spain.strftime("%H:%M")
 
-    if fecha_pr != fecha:
-        continue
-    if not (hora_inicio <= hora_pr <= hora_fin):
-        continue
-    if user not in alumnos:
+    if fecha_commit != fecha or not (hora_inicio <= hora_commit <= hora_fin):
         continue
 
     numero = alumnos[user]
 
-    # Enviar asistencia a Google Sheets
+    # =============================
+    # Enviar a Google Sheets
+    # =============================
     data = json.dumps({
         "numero": numero,
         "columna": columna,
         "filaInicio": FILA_INICIO
     }).encode("utf-8")
 
-    req_sheet = urllib.request.Request(os.environ["SHEETS_WEBHOOK"], data=data, headers={"Content-Type": "application/json"}, method="POST")
+    req_sheet = urllib.request.Request(
+        os.environ["SHEETS_WEBHOOK"],
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
     try:
         resp = urllib.request.urlopen(req_sheet)
-        print(f"{user}: {resp.read().decode()}")
+        print(f"{user} registrado: {resp.read().decode()}")
+        procesados += 1
     except Exception as e:
         print(f"Error enviando para {user}: {e}")
+
+print(f"Proceso finalizado. Total registrados: {procesados}")
