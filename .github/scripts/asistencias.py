@@ -81,24 +81,23 @@ for commit in commits:
 
     numero = alumnos[user]
 
-    print(f"Enviando al webhook: numero={numero}, columna={columna}, filaInicio={FILA_INICIO}")
-
     print("===================================")
-    print(f"Usuario: {user}")
-    print(f"Numero: {numero}")
-    print(f"Columna: {columna}")
-    print(f"Fecha PR: {fecha_pr}")
-    print(f"Hora PR: {hora_pr}")
+    print("Usuario:", user)
+    print("Numero real enviado:", numero)
+    print("Columna:", columna)
+    print("Fecha PR:", fecha_pr)
+    print("Hora PR:", hora_pr)
     print("===================================")
 
-    # =============================
-    # Enviar a Google Sheets
-    # =============================
-    data = json.dumps({
-        "numero": numero,
+    payload = {
+        "numero": str(numero),
         "columna": columna,
         "filaInicio": FILA_INICIO
-    }).encode("utf-8")
+    }
+
+    print("Payload exacto:", payload)
+
+    data = json.dumps(payload).encode("utf-8")
 
     req_sheet = urllib.request.Request(
         os.environ["SHEETS_WEBHOOK"],
@@ -107,11 +106,13 @@ for commit in commits:
         method="POST"
     )
 
+
     try:
         resp = urllib.request.urlopen(req_sheet)
+        respuesta = resp.read().decode()
         print(f"{user} registrado: {resp.read().decode()}")
         procesados += 1
-        print("Respuesta del webhook:", resp.read().decode())
+        print("Respuesta del webhook:", respuesta)
     except Exception as e:
         print(f"Error enviando para {user}: {e}")
 
